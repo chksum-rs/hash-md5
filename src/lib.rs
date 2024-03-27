@@ -265,6 +265,19 @@ impl Update {
     pub fn update(&mut self, data: impl AsRef<[u8]>) -> &mut Self {
         let data = data.as_ref();
 
+        // The `chunks_exact` method doesn't drain original vector so it needs to be handled manually
+        for _ in 0..(self.unprocessed.len() / BLOCK_LENGTH_BYTES) {
+            let block = {
+                let chunk = self.unprocessed.drain(..BLOCK_LENGTH_BYTES);
+                let chunk = chunk.as_slice();
+                Block::try_from(chunk)
+                    .expect("chunk length must be exact size as block")
+                    .into()
+            };
+            self.state = self.state.update(block);
+            self.processed = self.processed.wrapping_add(BLOCK_LENGTH_BYTES);
+        }
+
         if self.unprocessed.is_empty() {
             // Internal buffer is empty, incoming data can be processed without buffering.
             let mut chunks = data.chunks_exact(BLOCK_LENGTH_BYTES);
@@ -284,15 +297,8 @@ impl Update {
             self.unprocessed.extend(data);
         } else {
             // Create the first block from the buffer, create the second (and every other) block from incoming data.
-            assert!(
-                self.unprocessed.len() < BLOCK_LENGTH_BYTES,
-                "unprocessed must contain less data than one block"
-            );
-            let missing = BLOCK_LENGTH_BYTES - self.unprocessed.len();
-            assert!(
-                missing <= data.len(),
-                "data length must be greater than or equal to the missing block size"
-            );
+            let unprocessed = self.unprocessed.len() % BLOCK_LENGTH_BYTES;
+            let missing = BLOCK_LENGTH_BYTES - unprocessed;
             let (fillment, data) = data.split_at(missing);
             let block = {
                 let mut block = [0u8; BLOCK_LENGTH_BYTES];
@@ -331,23 +337,30 @@ impl Update {
     #[must_use]
     pub fn finalize(&self) -> Finalize {
         let mut state = self.state;
-
-        assert!(
-            self.unprocessed.len() < BLOCK_LENGTH_BYTES,
-            "unprocessed data length must be less than block length"
-        );
+        let mut processed = self.processed;
+        let unprocessed = {
+            let mut chunks = self.unprocessed.chunks_exact(BLOCK_LENGTH_BYTES);
+            for chunk in chunks.by_ref() {
+                let block = Block::try_from(chunk)
+                    .expect("chunk length must be exact size as block")
+                    .into();
+                state = state.update(block);
+                processed = processed.wrapping_add(BLOCK_LENGTH_BYTES);
+            }
+            chunks.remainder()
+        };
 
         let length = {
-            let length = (self.unprocessed.len() + self.processed) as u64;
-            let length = length * 8; // convert byte-length into bits-length
+            let length = unprocessed.len().wrapping_add(processed) as u64;
+            let length = length.wrapping_mul(8); // convert byte-length into bits-length
             length.to_le_bytes()
         };
 
-        if (self.unprocessed.len() + 1 + length.len()) <= BLOCK_LENGTH_BYTES {
+        if (unprocessed.len() + 1 + length.len()) <= BLOCK_LENGTH_BYTES {
             let padding = {
                 let mut padding = [0u8; BLOCK_LENGTH_BYTES];
-                padding[..self.unprocessed.len()].copy_from_slice(&self.unprocessed[..self.unprocessed.len()]);
-                padding[self.unprocessed.len()] = 0x80;
+                padding[..unprocessed.len()].copy_from_slice(&unprocessed[..unprocessed.len()]);
+                padding[unprocessed.len()] = 0x80;
                 padding[(BLOCK_LENGTH_BYTES - length.len())..].copy_from_slice(&length);
                 padding
             };
@@ -362,8 +375,8 @@ impl Update {
         } else {
             let padding = {
                 let mut padding = [0u8; BLOCK_LENGTH_BYTES * 2];
-                padding[..self.unprocessed.len()].copy_from_slice(&self.unprocessed[..self.unprocessed.len()]);
-                padding[self.unprocessed.len()] = 0x80;
+                padding[..unprocessed.len()].copy_from_slice(&unprocessed[..unprocessed.len()]);
+                padding[unprocessed.len()] = 0x80;
                 padding[(BLOCK_LENGTH_BYTES * 2 - length.len())..].copy_from_slice(&length);
                 padding
             };
