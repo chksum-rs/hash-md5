@@ -234,6 +234,7 @@ pub fn hash(data: impl AsRef<[u8]>) -> Digest {
 /// );
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct Update {
     state: State,
     unprocessed: Vec<u8>,

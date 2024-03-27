@@ -139,3 +139,34 @@ jobs:
         with:
           command: test
           args: --all-features --verbose
+
+  fuzzing-test:
+    needs:
+      - build-and-test-linux
+    runs-on: ubuntu-latest
+    name: Fuzzing test
+    steps:
+      - name: Repository checkout
+        uses: actions/checkout@v3
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          default: true
+          profile: minimal
+          components: llvm-tools
+      - name: Run cargo install cargo-fuzz
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-fuzz
+      - name: Run cargo fuzz run hash
+        uses: actions-rs/cargo@v1
+        with:
+          command: fuzz
+          args: run hash -- -max_len=65536 -max_total_time=60
+      - name: Run cargo fuzz run update
+        uses: actions-rs/cargo@v1
+        with:
+          command: fuzz
+          args: run update -- -max_len=65536 -max_total_time=60
