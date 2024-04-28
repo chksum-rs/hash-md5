@@ -6,7 +6,7 @@ members = [
 
 [package]
 name = "chksum-hash-md5"
-version = "0.0.0"
+version = "0.0.1"
 authors = ["Konrad Goławski <konrad@golawski.it>"]
 edition = "2021"
 rust-version = "1.63.0"
